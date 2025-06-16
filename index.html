@@ -1,107 +1,114 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR Collaboration Tool</title>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-  <script type="module" src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js"></script>
-  <script type="module" src="https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js"></script>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #annotation { position: absolute; top: 10px; left: 10px; background: white; padding: 10px; border-radius: 8px; font-family: sans-serif; }
-  </style>
-</head>
-<body>
-  <div id="annotation">Click on model to annotate</div>
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js";
-
-    const firebaseConfig = {
-  apiKey: "AIzaSyCZMmwiKQE06CkkMDyW-LJ_7LKWHiTkfT4",
-  authDomain: "remote-webxr.firebaseapp.com",
-  databaseURL: "https://remote-webxr-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "remote-webxr",
-  storageBucket: "remote-webxr.firebasestorage.app",
-  messagingSenderId: "988501576766",
-  appId: "1:988501576766:web:31e174b322a034979c156f",
-  measurementId: "G-ZGGER83W0C"
-};
-
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-    const annotationRef = ref(db, "annotations");
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    camera.position.set(0, 1, 3);
-    controls.update();
-
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(0, 5, 5);
-    scene.add(light);
-
-    const loader = new THREE.GLTFLoader();
-    loader.load('https://modelviewer.dev/shared-assets/models/Astronaut.glb', function(gltf) {
-      const model = gltf.scene;
-      model.name = "annotatableModel";
-      scene.add(model);
-    });
-
-    window.addEventListener('click', (e) => {
-      const mouse = new THREE.Vector2(
-        (e.clientX / window.innerWidth) * 2 - 1,
-        -(e.clientY / window.innerHeight) * 2 + 1
-      );
-
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
-
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        const id = Date.now().toString();
-        set(ref(db, `annotations/${id}`), {
-          x: point.x,
-          y: point.y,
-          z: point.z,
-          timestamp: id
-        });
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebXR Collaboration Tool</title>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      canvas { display: block; }
+      #annotation {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: white;
+        padding: 10px;
+        border-radius: 8px;
+        font-family: sans-serif;
       }
-    });
+    </style>
+  </head>
+  <body>
+    <div id="annotation">Click on model to annotate</div>
+    <script type="module">
+      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+      import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+      import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js';
+      import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js';
 
-    onValue(annotationRef, (snapshot) => {
-      const data = snapshot.val();
-      scene.children = scene.children.filter(obj => obj.userData.type !== "annotation");
+      const firebaseConfig = {
+        apiKey: "AIzaSyCZMmwiKQE06CkkMDyW-LJ_7LKWHiTkfT4",
+        authDomain: "remote-webxr.firebaseapp.com",
+        databaseURL: "https://remote-webxr-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "remote-webxr",
+        storageBucket: "remote-webxr.firebasestorage.app",
+        messagingSenderId: "988501576766",
+        appId: "1:988501576766:web:31e174b322a034979c156f",
+        measurementId: "G-ZGGER83W0C"
+      };
 
-      for (const key in data) {
-        const point = data[key];
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(0.01, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xff0000 })
-        );
-        dot.position.set(point.x, point.y, point.z);
-        dot.userData.type = "annotation";
-        scene.add(dot);
-      }
-    });
 
-    function animate() {
-      requestAnimationFrame(animate);
+      const app = initializeApp(firebaseConfig);
+      const db = getDatabase(app);
+      const annotationRef = ref(db, "annotations");
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      camera.position.set(0, 1, 3);
       controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-  </script>
-</body>
+
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(0, 5, 5);
+      scene.add(light);
+
+      const loader = new GLTFLoader();
+      loader.load('https://modelviewer.dev/shared-assets/models/Astronaut.glb', function(gltf) {
+        const model = gltf.scene;
+        model.name = "annotatableModel";
+        scene.add(model);
+      });
+
+      window.addEventListener('click', (e) => {
+        const mouse = new THREE.Vector2(
+          (e.clientX / window.innerWidth) * 2 - 1,
+          -(e.clientY / window.innerHeight) * 2 + 1
+        );
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+
+        if (intersects.length > 0) {
+          const point = intersects[0].point;
+          const id = Date.now().toString();
+          set(ref(db, `annotations/${id}`), {
+            x: point.x,
+            y: point.y,
+            z: point.z,
+            timestamp: id
+          });
+        }
+      });
+
+      onValue(annotationRef, (snapshot) => {
+        const data = snapshot.val();
+        scene.children = scene.children.filter(obj => obj.userData.type !== "annotation");
+
+        for (const key in data) {
+          const point = data[key];
+          const dot = new THREE.Mesh(
+            new THREE.SphereGeometry(0.01, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+          );
+          dot.position.set(point.x, point.y, point.z);
+          dot.userData.type = "annotation";
+          scene.add(dot);
+        }
+      });
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+    </script>
+  </body>
 </html>
