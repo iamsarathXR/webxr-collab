@@ -15,18 +15,30 @@
       padding: 10px;
       border-radius: 8px;
       font-family: sans-serif;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: sans-serif;
     }
   </style>
 </head>
 <body>
   <div id="annotation">Click on model to annotate</div>
+  <div id="loading">Loading...</div>
+  
+  <!-- Import Three.js as a script tag first -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
+  
+  <!-- Firebase -->
   <script type="module">
-    import * as THREE from './three';
-    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.min.js';
-    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.min.js';
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js';
     import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js';
-
+    
     const firebaseConfig = {
       apiKey: "AIzaSyCZMmwiKQE06CkkMDyW-LJ_7LKWHiTkfT4",
       authDomain: "remote-webxr.firebaseapp.com",
@@ -42,72 +54,140 @@
     const db = getDatabase(app);
     const annotationRef = ref(db, "annotations");
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    // Wait for Three.js to load
+    function initThreeJS() {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    camera.position.set(0, 1, 3);
-    controls.update();
+      // Controls - using the global THREE object
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      camera.position.set(0, 1, 3);
+      controls.update();
 
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(0, 5, 5);
-    scene.add(light);
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(0, 5, 5);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
 
-    const loader = new GLTFLoader();
-    loader.load('https://modelviewer.dev/shared-assets/models/Astronaut.glb', function (gltf) {
-      const model = gltf.scene;
-      model.name = "annotatableModel";
-      scene.add(model);
-    });
-
-    window.addEventListener('click', (e) => {
-      const mouse = new THREE.Vector2(
-        (e.clientX / window.innerWidth) * 2 - 1,
-        -(e.clientY / window.innerHeight) * 2 + 1
+      // Load model using GLTFLoader
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        'https://modelviewer.dev/shared-assets/models/Astronaut.glb',
+        function (gltf) {
+          const model = gltf.scene;
+          model.name = "annotatableModel";
+          model.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          scene.add(model);
+          document.getElementById('loading').style.display = 'none';
+        },
+        function (progress) {
+          console.log('Loading progress: ', (progress.loaded / progress.total * 100) + '%');
+        },
+        function (error) {
+          console.error('Error loading model:', error);
+          document.getElementById('loading').textContent = 'Error loading model';
+        }
       );
 
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
-
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        const id = Date.now().toString();
-        set(ref(db, `annotations/${id}`), {
-          x: point.x,
-          y: point.y,
-          z: point.z,
-          timestamp: id
-        });
-      }
-    });
-
-    onValue(annotationRef, (snapshot) => {
-      const data = snapshot.val();
-      scene.children = scene.children.filter(obj => obj.userData.type !== "annotation");
-
-      for (const key in data) {
-        const point = data[key];
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(0.01, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xff0000 })
+      // Click event for annotations
+      window.addEventListener('click', (e) => {
+        const mouse = new THREE.Vector2(
+          (e.clientX / window.innerWidth) * 2 - 1,
+          -(e.clientY / window.innerHeight) * 2 + 1
         );
-        dot.position.set(point.x, point.y, point.z);
-        dot.userData.type = "annotation";
-        scene.add(dot);
-      }
-    });
 
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+
+        if (intersects.length > 0) {
+          const point = intersects[0].point;
+          const id = Date.now().toString();
+          set(ref(db, `annotations/${id}`), {
+            x: point.x,
+            y: point.y,
+            z: point.z,
+            timestamp: id
+          });
+        }
+      });
+
+      // Listen for annotation updates
+      onValue(annotationRef, (snapshot) => {
+        const data = snapshot.val();
+        
+        // Remove existing annotations
+        const annotationsToRemove = [];
+        scene.traverse((child) => {
+          if (child.userData.type === "annotation") {
+            annotationsToRemove.push(child);
+          }
+        });
+        annotationsToRemove.forEach(child => scene.remove(child));
+
+        // Add new annotations
+        if (data) {
+          for (const key in data) {
+            const point = data[key];
+            const dot = new THREE.Mesh(
+              new THREE.SphereGeometry(0.02, 16, 16),
+              new THREE.MeshBasicMaterial({ color: 0xff0000 })
+            );
+            dot.position.set(point.x, point.y, point.z);
+            dot.userData.type = "annotation";
+            scene.add(dot);
+          }
+        }
+      });
+
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Animation loop
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
     }
 
-    animate();
+    // Initialize when page loads
+    window.addEventListener('load', () => {
+      // Add the necessary Three.js extensions
+      if (window.THREE) {
+        // Add OrbitControls to THREE
+        const script1 = document.createElement('script');
+        script1.src = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js';
+        script1.onload = () => {
+          // Add GLTFLoader to THREE
+          const script2 = document.createElement('script');
+          script2.src = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js';
+          script2.onload = initThreeJS;
+          document.head.appendChild(script2);
+        };
+        document.head.appendChild(script1);
+      }
+    });
   </script>
 </body>
 </html>
