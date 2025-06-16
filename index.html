@@ -5,18 +5,70 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WebXR Collaboration Tool</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #1a1a1a; }
-    canvas { display: block; }
-    #annotation {
+    body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
+    canvas { display: block; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+    #ui {
       position: absolute;
       top: 10px;
       left: 10px;
       background: rgba(255,255,255,0.9);
-      padding: 10px;
+      padding: 15px;
       border-radius: 8px;
-      font-family: sans-serif;
       box-shadow: 0 2px 10px rgba(0,0,0,0.3);
       z-index: 100;
+      max-width: 300px;
+    }
+    #annotations-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255,255,255,0.9);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      z-index: 100;
+      max-width: 250px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .annotation-item {
+      padding: 8px;
+      margin: 5px 0;
+      background: #f0f0f0;
+      border-radius: 4px;
+      border-left: 4px solid #ff3333;
+      font-size: 12px;
+    }
+    .annotation-actions {
+      margin-top: 5px;
+    }
+    .btn {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      margin-right: 5px;
+    }
+    .btn:hover {
+      background: #0056b3;
+    }
+    .btn-danger {
+      background: #dc3545;
+    }
+    .btn-danger:hover {
+      background: #c82333;
+    }
+    #status {
+      margin-top: 10px;
+      padding: 8px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #666;
     }
     #loading {
       position: absolute;
@@ -24,287 +76,507 @@
       left: 50%;
       transform: translate(-50%, -50%);
       color: white;
-      font-family: sans-serif;
       font-size: 18px;
       z-index: 100;
-    }
-    #error {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #ff6b6b;
-      font-family: sans-serif;
-      text-align: center;
-      z-index: 100;
-      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="annotation">Click on model to annotate</div>
-  <div id="loading">Loading 3D Model...</div>
-  <div id="error">
-    <div>Unable to load external model</div>
-    <div style="font-size: 14px; margin-top: 10px;">Showing cube placeholder instead</div>
+  <div id="ui">
+    <div><strong>WebXR Collaboration Tool</strong></div>
+    <div>• Hold and drag: Rotate camera</div>
+    <div>• Click on objects: Add annotations</div>
+    <div>• Right-click annotations: Add comments</div>
+    <div id="status">Loading...</div>
   </div>
+  
+  <div id="annotations-panel">
+    <div><strong>Annotations</strong></div>
+    <div id="annotation-list">No annotations yet</div>
+    <button class="btn" onclick="clearAllAnnotations()">Clear All</button>
+  </div>
+  <div id="loading">Initializing 3D Scene...</div>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    // Firebase simulation (since external Firebase might not work in preview)
-    const mockFirebase = {
+    // Enhanced Firebase mock with more functionality
+    const mockDB = {
       annotations: {},
       listeners: [],
-      set: function(path, data) {
-        const id = path.split('/')[1];
+      
+      addAnnotation(id, data) {
         this.annotations[id] = data;
         this.notifyListeners();
+        this.updateAnnotationsList();
       },
-      onValue: function(callback) {
+      
+      removeAnnotation(id) {
+        delete this.annotations[id];
+        this.notifyListeners();
+        this.updateAnnotationsList();
+      },
+      
+      updateAnnotation(id, data) {
+        if (this.annotations[id]) {
+          this.annotations[id] = { ...this.annotations[id], ...data };
+          this.notifyListeners();
+          this.updateAnnotationsList();
+        }
+      },
+      
+      onUpdate(callback) {
         this.listeners.push(callback);
-        // Initial call
-        callback({ val: () => this.annotations });
+        callback(this.annotations); // Initial call
       },
-      notifyListeners: function() {
-        this.listeners.forEach(listener => {
-          listener({ val: () => this.annotations });
-        });
+      
+      notifyListeners() {
+        this.listeners.forEach(cb => cb(this.annotations));
+      },
+      
+      updateAnnotationsList() {
+        const listEl = document.getElementById('annotation-list');
+        if (!listEl) return;
+        
+        const annotations = Object.entries(this.annotations);
+        if (annotations.length === 0) {
+          listEl.innerHTML = 'No annotations yet';
+          return;
+        }
+        
+        listEl.innerHTML = annotations.map(([id, annotation]) => {
+          const time = new Date(parseInt(id)).toLocaleTimeString();
+          return `
+            <div class="annotation-item">
+              <div><strong>Annotation ${annotations.length - annotations.indexOf([id, annotation])}</strong></div>
+              <div>Position: (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})</div>
+              <div>Time: ${time}</div>
+              ${annotation.comment ? `<div>Note: ${annotation.comment}</div>` : ''}
+              <div class="annotation-actions">
+                <button class="btn" onclick="addComment('${id}')">Add Note</button>
+                <button class="btn" onclick="focusAnnotation('${id}')">Focus</button>
+                <button class="btn btn-danger" onclick="removeAnnotation('${id}')">Delete</button>
+              </div>
+            </div>
+          `;
+        }).join('');
       }
     };
 
-    let scene, camera, renderer, controls;
-    let model = null;
-    const annotations = [];
+    let scene, camera, renderer;
+    let isMouseDown = false;
+    let isDragging = false;
+    let mouseStart = { x: 0, y: 0 };
+    let cameraRadius = 8;
+    let cameraTheta = 0; // horizontal angle
+    let cameraPhi = Math.PI / 4; // vertical angle
+    
+    let annotationObjects = []; // Objects that can be annotated
+    let statusEl;
 
     function init() {
-      // Scene setup
+      statusEl = document.getElementById('status');
+      updateStatus("Initializing...");
+
+      // Create scene
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x2c3e50);
-      
-      // Camera
+      scene.background = new THREE.Color(0x222244);
+
+      // Create camera
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(0, 2, 5);
-      
-      // Renderer
+      updateCameraPosition();
+
+      // Create renderer
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       document.body.appendChild(renderer.domElement);
 
-      // Controls (basic implementation)
-      setupControls();
-
-      // Lighting
-      const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
-      scene.add(ambientLight);
+      // Add lighting
+      setupLighting();
       
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(5, 10, 5);
-      directionalLight.castShadow = true;
-      directionalLight.shadow.mapSize.width = 2048;
-      directionalLight.shadow.mapSize.height = 2048;
-      scene.add(directionalLight);
-
-      // Try to load external model, fallback to local model
-      loadModel();
-
-      // Set up event listeners
+      // Create 3D objects
+      createObjects();
+      
+      // Setup event listeners
       setupEventListeners();
-
-      // Start animation loop
+      
+      // Start render loop
       animate();
+      
+      // Hide loading
+      document.getElementById('loading').style.display = 'none';
+      updateStatus("Ready! Drag to rotate, click to annotate");
     }
 
-    function setupControls() {
-      let isMouseDown = false;
-      let mouseX = 0, mouseY = 0;
-      let targetX = 0, targetY = 0;
+    function setupLighting() {
+      // Ambient light
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+      scene.add(ambientLight);
 
-      renderer.domElement.addEventListener('mousedown', (e) => {
-        if (e.button === 0) { // Left mouse button
-          isMouseDown = true;
-          mouseX = e.clientX;
-          mouseY = e.clientY;
-        }
-      });
+      // Main directional light
+      const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      mainLight.position.set(10, 10, 5);
+      mainLight.castShadow = true;
+      mainLight.shadow.mapSize.width = 2048;
+      mainLight.shadow.mapSize.height = 2048;
+      scene.add(mainLight);
 
-      document.addEventListener('mouseup', () => {
-        isMouseDown = false;
-      });
-
-      document.addEventListener('mousemove', (e) => {
-        if (isMouseDown) {
-          const deltaX = e.clientX - mouseX;
-          const deltaY = e.clientY - mouseY;
-          
-          targetX += deltaX * 0.01;
-          targetY += deltaY * 0.01;
-          
-          mouseX = e.clientX;
-          mouseY = e.clientY;
-        }
-      });
-
-      // Apply rotation in animation loop
-      function updateControls() {
-        if (model) {
-          model.rotation.y += (targetX - model.rotation.y) * 0.05;
-          model.rotation.x += (targetY - model.rotation.x) * 0.05;
-          targetX *= 0.95;
-          targetY *= 0.95;
-        }
-      }
-
-      return { update: updateControls };
+      // Fill light
+      const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+      fillLight.position.set(-5, 3, -5);
+      scene.add(fillLight);
     }
 
-    function loadModel() {
-      // Create a placeholder model (colorful geometric shape)
-      const geometry = new THREE.BoxGeometry(1, 1.5, 0.5);
-      const materials = [
-        new THREE.MeshLambertMaterial({ color: 0xff6b6b }), // red
-        new THREE.MeshLambertMaterial({ color: 0x4ecdc4 }), // teal
-        new THREE.MeshLambertMaterial({ color: 0x45b7d1 }), // blue
-        new THREE.MeshLambertMaterial({ color: 0xf9ca24 }), // yellow
-        new THREE.MeshLambertMaterial({ color: 0x6c5ce7 }), // purple
-        new THREE.MeshLambertMaterial({ color: 0xa55eea }), // pink
+    function createObjects() {
+      // Main cube (annotatable)
+      const cubeGeometry = new THREE.BoxGeometry(2, 2, 2);
+      const cubeMaterials = [
+        new THREE.MeshLambertMaterial({ color: 0xff6b6b }),
+        new THREE.MeshLambertMaterial({ color: 0x4ecdc4 }),
+        new THREE.MeshLambertMaterial({ color: 0x45b7d1 }),
+        new THREE.MeshLambertMaterial({ color: 0xf9ca24 }),
+        new THREE.MeshLambertMaterial({ color: 0x6c5ce7 }),
+        new THREE.MeshLambertMaterial({ color: 0xa55eea })
       ];
       
-      model = new THREE.Mesh(geometry, materials);
-      model.position.set(0, 0, 0);
-      model.castShadow = true;
-      model.receiveShadow = true;
-      model.name = "annotatableModel";
-      scene.add(model);
+      const cube = new THREE.Mesh(cubeGeometry, cubeMaterials);
+      cube.position.set(0, 1, 0);
+      cube.castShadow = true;
+      cube.receiveShadow = true;
+      cube.userData.annotatable = true;
+      scene.add(cube);
+      annotationObjects.push(cube);
 
-      // Add some additional geometric elements to make it more interesting
-      const sphereGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-      const sphereMaterial = new THREE.MeshLambertMaterial({ color: 0xff9ff3 });
-      
-      for (let i = 0; i < 5; i++) {
+      // Floating spheres (annotatable)
+      for (let i = 0; i < 6; i++) {
+        const sphereGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+        const sphereMaterial = new THREE.MeshLambertMaterial({ 
+          color: new THREE.Color().setHSL(i / 6, 0.8, 0.6) 
+        });
+        
         const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        const angle = (i / 6) * Math.PI * 2;
         sphere.position.set(
-          (Math.random() - 0.5) * 3,
-          (Math.random() - 0.5) * 3,
-          (Math.random() - 0.5) * 3
+          Math.cos(angle) * 3,
+          1 + Math.sin(i) * 0.5,
+          Math.sin(angle) * 3
         );
         sphere.castShadow = true;
+        sphere.receiveShadow = true;
+        sphere.userData.annotatable = true;
         scene.add(sphere);
+        annotationObjects.push(sphere);
       }
 
-      // Add ground plane
-      const planeGeometry = new THREE.PlaneGeometry(10, 10);
-      const planeMaterial = new THREE.MeshLambertMaterial({ color: 0x34495e });
-      const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-      plane.rotation.x = -Math.PI / 2;
-      plane.position.y = -1;
-      plane.receiveShadow = true;
-      scene.add(plane);
+      // Ground plane (not annotatable)
+      const groundGeometry = new THREE.PlaneGeometry(20, 20);
+      const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x333366 });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      ground.userData.annotatable = false;
+      scene.add(ground);
 
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('annotation').innerHTML = 'Click on objects to annotate - Drag to rotate view';
+      // Grid helper
+      const gridHelper = new THREE.GridHelper(20, 20, 0x444466, 0x444466);
+      gridHelper.position.y = 0.01;
+      scene.add(gridHelper);
     }
 
     function setupEventListeners() {
-      // Click event for annotations
-      renderer.domElement.addEventListener('click', (e) => {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const mouse = new THREE.Vector2(
-          ((e.clientX - rect.left) / rect.width) * 2 - 1,
-          -((e.clientY - rect.top) / rect.height) * 2 + 1
-        );
+      const canvas = renderer.domElement;
 
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(scene.children, true);
+      // Mouse down
+      canvas.addEventListener('mousedown', (e) => {
+        isMouseDown = true;
+        isDragging = false;
+        mouseStart.x = e.clientX;
+        mouseStart.y = e.clientY;
+        updateStatus("Hold and drag to rotate camera");
+      });
 
-        if (intersects.length > 0) {
-          const point = intersects[0].point;
-          const id = Date.now().toString();
+      // Mouse up
+      document.addEventListener('mouseup', (e) => {
+        if (isMouseDown && !isDragging) {
+          // This was a click, not a drag
+          handleClick(e);
+        }
+        isMouseDown = false;
+        isDragging = false;
+        updateStatus("Ready! Drag to rotate, click to annotate");
+      });
+
+      // Mouse move
+      document.addEventListener('mousemove', (e) => {
+        if (!isMouseDown) return;
+
+        const deltaX = e.clientX - mouseStart.x;
+        const deltaY = e.clientY - mouseStart.y;
+
+        // Check if this constitutes a drag
+        if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+          isDragging = true;
           
-          // Use mock Firebase
-          mockFirebase.set(`annotations/${id}`, {
-            x: point.x,
-            y: point.y,
-            z: point.z,
-            timestamp: id
-          });
+          // Update camera angles
+          cameraTheta -= deltaX * 0.01;
+          cameraPhi = Math.max(0.1, Math.min(Math.PI - 0.1, cameraPhi + deltaY * 0.01));
+          
+          updateCameraPosition();
+          updateStatus(`Rotating camera (θ:${(cameraTheta * 180/Math.PI).toFixed(0)}°)`);
         }
+
+        mouseStart.x = e.clientX;
+        mouseStart.y = e.clientY;
       });
 
-      // Listen for annotation updates
-      mockFirebase.onValue((snapshot) => {
-        const data = snapshot.val();
-        
-        // Remove existing annotation dots
-        const dotsToRemove = [];
-        scene.traverse((child) => {
-          if (child.userData.type === "annotation") {
-            dotsToRemove.push(child);
-          }
-        });
-        dotsToRemove.forEach(dot => scene.remove(dot));
-
-        // Add new annotation dots
-        if (data) {
-          for (const key in data) {
-            const point = data[key];
-            const dotGeometry = new THREE.SphereGeometry(0.05, 16, 16);
-            const dotMaterial = new THREE.MeshBasicMaterial({ 
-              color: 0xff0000,
-              transparent: true,
-              opacity: 0.8
-            });
-            const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-            dot.position.set(point.x, point.y, point.z);
-            dot.userData.type = "annotation";
-            scene.add(dot);
-
-            // Add a glowing effect
-            const glowGeometry = new THREE.SphereGeometry(0.08, 16, 16);
-            const glowMaterial = new THREE.MeshBasicMaterial({
-              color: 0xff4444,
-              transparent: true,
-              opacity: 0.3
-            });
-            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-            glow.position.copy(dot.position);
-            glow.userData.type = "annotation";
-            scene.add(glow);
-          }
-        }
+      // Wheel zoom
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        cameraRadius = Math.max(3, Math.min(15, cameraRadius + e.deltaY * 0.01));
+        updateCameraPosition();
+        updateStatus(`Zoom: ${cameraRadius.toFixed(1)}`);
       });
 
-      // Handle window resize
+      // Window resize
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
+
+      // Listen for annotation updates
+      mockDB.onUpdate((annotations) => {
+        updateAnnotationDisplay(annotations);
+      });
+    }
+
+    function handleClick(e) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Check if clicking on existing annotation first
+      const annotationDots = [];
+      scene.traverse((child) => {
+        if (child.userData.isAnnotation && child.userData.clickable) {
+          annotationDots.push(child);
+        }
+      });
+      
+      const annotationIntersects = raycaster.intersectObjects(annotationDots);
+      if (annotationIntersects.length > 0) {
+        const annotationId = annotationIntersects[0].object.userData.annotationId;
+        showAnnotationDetails(annotationId);
+        return;
+      }
+      
+      // Otherwise check annotatable objects
+      const intersects = raycaster.intersectObjects(annotationObjects, true);
+
+      if (intersects.length > 0) {
+        const point = intersects[0].point;
+        const id = Date.now().toString();
+        
+        mockDB.addAnnotation(id, {
+          x: point.x,
+          y: point.y,
+          z: point.z,
+          timestamp: id,
+          comment: ''
+        });
+        
+        updateStatus(`Annotation ${Object.keys(mockDB.annotations).length} added! Click on red dots for options.`);
+      } else {
+        updateStatus("Click on colored objects to annotate");
+      }
+    }
+
+    // Global functions for UI interaction
+    window.addComment = function(id) {
+      const comment = prompt('Add a note to this annotation:');
+      if (comment) {
+        mockDB.updateAnnotation(id, { comment: comment });
+        updateStatus(`Note added to annotation`);
+      }
+    };
+
+    window.removeAnnotation = function(id) {
+      if (confirm('Delete this annotation?')) {
+        mockDB.removeAnnotation(id);
+        updateStatus(`Annotation deleted`);
+      }
+    };
+
+    window.focusAnnotation = function(id) {
+      const annotation = mockDB.annotations[id];
+      if (annotation) {
+        // Smoothly move camera to focus on annotation
+        const targetTheta = Math.atan2(annotation.z, annotation.x);
+        const targetPhi = Math.PI / 3;
+        
+        animateCamera(targetTheta, targetPhi, 5);
+        updateStatus(`Focusing on annotation at (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})`);
+      }
+    };
+
+    window.clearAllAnnotations = function() {
+      if (Object.keys(mockDB.annotations).length === 0) {
+        updateStatus("No annotations to clear");
+        return;
+      }
+      
+      if (confirm('Delete all annotations?')) {
+        mockDB.annotations = {};
+        mockDB.notifyListeners();
+        mockDB.updateAnnotationsList();
+        updateStatus("All annotations cleared");
+      }
+    };
+
+    function showAnnotationDetails(id) {
+      const annotation = mockDB.annotations[id];
+      if (annotation) {
+        const time = new Date(parseInt(id)).toLocaleTimeString();
+        let message = `Annotation Details:\nPosition: (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})\nTime: ${time}`;
+        if (annotation.comment) {
+          message += `\nNote: ${annotation.comment}`;
+        }
+        alert(message);
+      }
+    }
+
+    function animateCamera(targetTheta, targetPhi, targetRadius) {
+      const startTheta = cameraTheta;
+      const startPhi = cameraPhi;
+      const startRadius = cameraRadius;
+      const duration = 1000; // 1 second
+      const startTime = Date.now();
+
+      function updateCamera() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const easeProgress = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+
+        cameraTheta = startTheta + (targetTheta - startTheta) * easeProgress;
+        cameraPhi = startPhi + (targetPhi - startPhi) * easeProgress;
+        cameraRadius = startRadius + (targetRadius - startRadius) * easeProgress;
+
+        updateCameraPosition();
+
+        if (progress < 1) {
+          requestAnimationFrame(updateCamera);
+        }
+      }
+
+      updateCamera();
+    }
+
+    function updateCameraPosition() {
+      camera.position.x = cameraRadius * Math.sin(cameraPhi) * Math.cos(cameraTheta);
+      camera.position.y = cameraRadius * Math.cos(cameraPhi);
+      camera.position.z = cameraRadius * Math.sin(cameraPhi) * Math.sin(cameraTheta);
+      camera.lookAt(0, 1, 0);
+    }
+
+    function updateAnnotationDisplay(annotations) {
+      // Remove existing annotation dots
+      const dotsToRemove = [];
+      scene.traverse((child) => {
+        if (child.userData.isAnnotation) {
+          dotsToRemove.push(child);
+        }
+      });
+      dotsToRemove.forEach(dot => scene.remove(dot));
+
+      // Add new annotation dots
+      Object.entries(annotations).forEach(([id, annotation]) => {
+        // Main clickable dot
+        const dotGeometry = new THREE.SphereGeometry(0.08, 16, 16);
+        const dotMaterial = new THREE.MeshBasicMaterial({ 
+          color: 0xff3333,
+          transparent: true,
+          opacity: 0.9
+        });
+        const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+        dot.position.set(annotation.x, annotation.y, annotation.z);
+        dot.userData.isAnnotation = true;
+        dot.userData.clickable = true;
+        dot.userData.annotationId = id;
+        scene.add(dot);
+
+        // Outer glow (not clickable)
+        const glowGeometry = new THREE.SphereGeometry(0.12, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+          color: annotation.comment ? 0x44ff44 : 0xff6666, // Green if has comment, red if not
+          transparent: true,
+          opacity: 0.3
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        glow.position.copy(dot.position);
+        glow.userData.isAnnotation = true;
+        glow.userData.clickable = false;
+        scene.add(glow);
+
+        // Add floating number label
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 64;
+        canvas.height = 64;
+        context.fillStyle = 'white';
+        context.fillRect(0, 0, 64, 64);
+        context.fillStyle = 'black';
+        context.font = 'bold 32px Arial';
+        context.textAlign = 'center';
+        context.fillText(Object.keys(annotations).indexOf(id) + 1, 32, 42);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        const labelMaterial = new THREE.SpriteMaterial({ map: texture });
+        const label = new THREE.Sprite(labelMaterial);
+        label.position.set(annotation.x, annotation.y + 0.3, annotation.z);
+        label.scale.set(0.3, 0.3, 1);
+        label.userData.isAnnotation = true;
+        label.userData.clickable = false;
+        scene.add(label);
+      });
+    }
+
+    function updateStatus(message) {
+      if (statusEl) {
+        statusEl.textContent = message;
+      }
     }
 
     function animate() {
       requestAnimationFrame(animate);
-      
-      // Update controls
-      if (controls && controls.update) {
-        controls.update();
-      }
-      
-      // Animate annotation dots
-      scene.traverse((child) => {
-        if (child.userData.type === "annotation") {
-          child.rotation.y += 0.02;
-          child.scale.setScalar(1 + Math.sin(Date.now() * 0.003) * 0.1);
+
+      // Animate floating spheres
+      const time = Date.now() * 0.001;
+      annotationObjects.forEach((obj, index) => {
+        if (obj.geometry instanceof THREE.SphereGeometry) {
+          obj.position.y = 1 + Math.sin(time + index) * 0.2;
+          obj.rotation.y = time + index;
         }
       });
-      
-      // Render
+
+      // Animate annotation dots
+      scene.traverse((child) => {
+        if (child.userData.isAnnotation) {
+          child.rotation.y += 0.02;
+          const scale = 1 + Math.sin(time * 3) * 0.1;
+          child.scale.setScalar(scale);
+        }
+      });
+
       renderer.render(scene, camera);
     }
 
-    // Initialize when page loads
+    // Start the application
     window.addEventListener('load', init);
   </script>
 </body>
