@@ -8,68 +8,7 @@
     body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
     canvas { display: block; cursor: grab; }
     canvas:active { cursor: grabbing; }
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(255,255,255,0.9);
-      padding: 15px;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-      z-index: 100;
-      max-width: 300px;
-    }
-    #annotations-panel {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(255,255,255,0.9);
-      padding: 15px;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-      z-index: 100;
-      max-width: 250px;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .annotation-item {
-      padding: 8px;
-      margin: 5px 0;
-      background: #f0f0f0;
-      border-radius: 4px;
-      border-left: 4px solid #ff3333;
-      font-size: 12px;
-    }
-    .annotation-actions {
-      margin-top: 5px;
-    }
-    .btn {
-      background: #007bff;
-      color: white;
-      border: none;
-      padding: 4px 8px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 11px;
-      margin-right: 5px;
-    }
-    .btn:hover {
-      background: #0056b3;
-    }
-    .btn-danger {
-      background: #dc3545;
-    }
-    .btn-danger:hover {
-      background: #c82333;
-    }
-    #status {
-      margin-top: 10px;
-      padding: 8px;
-      background: #f0f0f0;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #666;
-    }
+    #ui, #annotations-panel { display: none; } /* Hide DOM UI in immersive mode */
     #loading {
       position: absolute;
       top: 50%;
@@ -82,272 +21,97 @@
   </style>
 </head>
 <body>
-  <div id="ui">
-    <div><strong>WebXR Collaboration Tool</strong></div>
-    <div>• Hold and drag: Rotate camera</div>
-    <div>• Click on objects: Add annotations</div>
-    <div>• Right-click annotations: Add comments</div>
-    <div id="status">Loading...</div>
-  </div>
-  
-  <div id="annotations-panel">
-    <div><strong>Annotations</strong></div>
-    <div id="annotation-list">No annotations yet</div>
-    <button class="btn" onclick="clearAllAnnotations()">Clear All</button>
-  </div>
   <div id="loading">Initializing 3D Scene...</div>
-  
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    // Enhanced Firebase mock with more functionality
     const mockDB = {
       annotations: {},
       listeners: [],
-      
       addAnnotation(id, data) {
         this.annotations[id] = data;
         this.notifyListeners();
-        this.updateAnnotationsList();
       },
-      
       removeAnnotation(id) {
         delete this.annotations[id];
         this.notifyListeners();
-        this.updateAnnotationsList();
       },
-      
       updateAnnotation(id, data) {
         if (this.annotations[id]) {
           this.annotations[id] = { ...this.annotations[id], ...data };
           this.notifyListeners();
-          this.updateAnnotationsList();
         }
       },
-      
       onUpdate(callback) {
         this.listeners.push(callback);
-        callback(this.annotations); // Initial call
+        callback(this.annotations);
       },
-      
       notifyListeners() {
         this.listeners.forEach(cb => cb(this.annotations));
-      },
-      
-      updateAnnotationsList() {
-        const listEl = document.getElementById('annotation-list');
-        if (!listEl) return;
-        
-        const annotations = Object.entries(this.annotations);
-        if (annotations.length === 0) {
-          listEl.innerHTML = 'No annotations yet';
-          return;
-        }
-        
-        listEl.innerHTML = annotations.map(([id, annotation]) => {
-          const time = new Date(parseInt(id)).toLocaleTimeString();
-          return `
-            <div class="annotation-item">
-              <div><strong>Annotation ${annotations.length - annotations.indexOf([id, annotation])}</strong></div>
-              <div>Position: (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})</div>
-              <div>Time: ${time}</div>
-              ${annotation.comment ? `<div>Note: ${annotation.comment}</div>` : ''}
-              <div class="annotation-actions">
-                <button class="btn" onclick="addComment('${id}')">Add Note</button>
-                <button class="btn" onclick="focusAnnotation('${id}')">Focus</button>
-                <button class="btn btn-danger" onclick="removeAnnotation('${id}')">Delete</button>
-              </div>
-            </div>
-          `;
-        }).join('');
       }
     };
 
     let scene, camera, renderer;
-    let isMouseDown = false;
-    let isDragging = false;
-    let mouseStart = { x: 0, y: 0 };
+    let annotationObjects = [];
     let cameraRadius = 8;
-    let cameraTheta = 0; // horizontal angle
-    let cameraPhi = Math.PI / 4; // vertical angle
-    
-    let annotationObjects = []; // Objects that can be annotated
-    let statusEl;
+    let cameraTheta = 0;
+    let cameraPhi = Math.PI / 4;
 
     function init() {
-      statusEl = document.getElementById('status');
-      updateStatus("Initializing...");
-
-      // Create scene
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x222244);
 
-      // Create camera
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       updateCameraPosition();
 
-      // Create renderer
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       document.body.appendChild(renderer.domElement);
 
-      // Add lighting
       setupLighting();
-      
-      // Create 3D objects
       createObjects();
-      
-      // Setup event listeners
       setupEventListeners();
-      
-      // Start render loop
       animate();
-      
-      // Hide loading
+
       document.getElementById('loading').style.display = 'none';
-      updateStatus("Ready! Drag to rotate, click to annotate");
     }
 
     function setupLighting() {
-      // Ambient light
-      const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
-      scene.add(ambientLight);
-
-      // Main directional light
-      const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      mainLight.position.set(10, 10, 5);
-      mainLight.castShadow = true;
-      mainLight.shadow.mapSize.width = 2048;
-      mainLight.shadow.mapSize.height = 2048;
-      scene.add(mainLight);
-
-      // Fill light
-      const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
-      fillLight.position.set(-5, 3, -5);
-      scene.add(fillLight);
+      scene.add(new THREE.AmbientLight(0x404040, 0.4));
+      const light = new THREE.DirectionalLight(0xffffff, 0.8);
+      light.position.set(10, 10, 5);
+      light.castShadow = true;
+      scene.add(light);
     }
 
     function createObjects() {
-      // Main cube (annotatable)
-      const cubeGeometry = new THREE.BoxGeometry(2, 2, 2);
-      const cubeMaterials = [
-        new THREE.MeshLambertMaterial({ color: 0xff6b6b }),
-        new THREE.MeshLambertMaterial({ color: 0x4ecdc4 }),
-        new THREE.MeshLambertMaterial({ color: 0x45b7d1 }),
-        new THREE.MeshLambertMaterial({ color: 0xf9ca24 }),
-        new THREE.MeshLambertMaterial({ color: 0x6c5ce7 }),
-        new THREE.MeshLambertMaterial({ color: 0xa55eea })
-      ];
-      
-      const cube = new THREE.Mesh(cubeGeometry, cubeMaterials);
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshLambertMaterial({ color: 0xff6b6b }));
       cube.position.set(0, 1, 0);
-      cube.castShadow = true;
-      cube.receiveShadow = true;
       cube.userData.annotatable = true;
       scene.add(cube);
       annotationObjects.push(cube);
 
-      // Floating spheres (annotatable)
       for (let i = 0; i < 6; i++) {
-        const sphereGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-        const sphereMaterial = new THREE.MeshLambertMaterial({ 
-          color: new THREE.Color().setHSL(i / 6, 0.8, 0.6) 
-        });
-        
-        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(i / 6, 0.8, 0.6) }));
         const angle = (i / 6) * Math.PI * 2;
-        sphere.position.set(
-          Math.cos(angle) * 3,
-          1 + Math.sin(i) * 0.5,
-          Math.sin(angle) * 3
-        );
-        sphere.castShadow = true;
-        sphere.receiveShadow = true;
+        sphere.position.set(Math.cos(angle) * 3, 1 + Math.sin(i) * 0.5, Math.sin(angle) * 3);
         sphere.userData.annotatable = true;
         scene.add(sphere);
         annotationObjects.push(sphere);
       }
 
-      // Ground plane (not annotatable)
-      const groundGeometry = new THREE.PlaneGeometry(20, 20);
-      const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x333366 });
-      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshLambertMaterial({ color: 0x333366 }));
       ground.rotation.x = -Math.PI / 2;
-      ground.receiveShadow = true;
-      ground.userData.annotatable = false;
       scene.add(ground);
-
-      // Grid helper
-      const gridHelper = new THREE.GridHelper(20, 20, 0x444466, 0x444466);
-      gridHelper.position.y = 0.01;
-      scene.add(gridHelper);
     }
 
     function setupEventListeners() {
-      const canvas = renderer.domElement;
-
-      // Mouse down
-      canvas.addEventListener('mousedown', (e) => {
-        isMouseDown = true;
-        isDragging = false;
-        mouseStart.x = e.clientX;
-        mouseStart.y = e.clientY;
-        updateStatus("Hold and drag to rotate camera");
-      });
-
-      // Mouse up
-      document.addEventListener('mouseup', (e) => {
-        if (isMouseDown && !isDragging) {
-          // This was a click, not a drag
-          handleClick(e);
-        }
-        isMouseDown = false;
-        isDragging = false;
-        updateStatus("Ready! Drag to rotate, click to annotate");
-      });
-
-      // Mouse move
-      document.addEventListener('mousemove', (e) => {
-        if (!isMouseDown) return;
-
-        const deltaX = e.clientX - mouseStart.x;
-        const deltaY = e.clientY - mouseStart.y;
-
-        // Check if this constitutes a drag
-        if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
-          isDragging = true;
-          
-          // Update camera angles
-          cameraTheta -= deltaX * 0.01;
-          cameraPhi = Math.max(0.1, Math.min(Math.PI - 0.1, cameraPhi + deltaY * 0.01));
-          
-          updateCameraPosition();
-          updateStatus(`Rotating camera (θ:${(cameraTheta * 180/Math.PI).toFixed(0)}°)`);
-        }
-
-        mouseStart.x = e.clientX;
-        mouseStart.y = e.clientY;
-      });
-
-      // Wheel zoom
-      canvas.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        cameraRadius = Math.max(3, Math.min(15, cameraRadius + e.deltaY * 0.01));
-        updateCameraPosition();
-        updateStatus(`Zoom: ${cameraRadius.toFixed(1)}`);
-      });
-
-      // Window resize
+      renderer.domElement.addEventListener('click', handleClick);
+      mockDB.onUpdate(updateAnnotationDisplay);
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
-      });
-
-      // Listen for annotation updates
-      mockDB.onUpdate((annotations) => {
-        updateAnnotationDisplay(annotations);
       });
     }
 
@@ -357,124 +121,49 @@
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1
       );
-
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, camera);
-      
-      // Check if clicking on existing annotation first
-      const annotationDots = [];
-      scene.traverse((child) => {
-        if (child.userData.isAnnotation && child.userData.clickable) {
-          annotationDots.push(child);
-        }
-      });
-      
-      const annotationIntersects = raycaster.intersectObjects(annotationDots);
-      if (annotationIntersects.length > 0) {
-        const annotationId = annotationIntersects[0].object.userData.annotationId;
-        showAnnotationDetails(annotationId);
-        return;
-      }
-      
-      // Otherwise check annotatable objects
       const intersects = raycaster.intersectObjects(annotationObjects, true);
-
       if (intersects.length > 0) {
         const point = intersects[0].point;
         const id = Date.now().toString();
-        
-        mockDB.addAnnotation(id, {
-          x: point.x,
-          y: point.y,
-          z: point.z,
-          timestamp: id,
-          comment: ''
-        });
-        
-        updateStatus(`Annotation ${Object.keys(mockDB.annotations).length} added! Click on red dots for options.`);
-      } else {
-        updateStatus("Click on colored objects to annotate");
+        mockDB.addAnnotation(id, { x: point.x, y: point.y, z: point.z, comment: `Note ${Object.keys(mockDB.annotations).length + 1}` });
       }
     }
 
-    // Global functions for UI interaction
-    window.addComment = function(id) {
-      const comment = prompt('Add a note to this annotation:');
-      if (comment) {
-        mockDB.updateAnnotation(id, { comment: comment });
-        updateStatus(`Note added to annotation`);
-      }
-    };
+    function updateAnnotationDisplay(annotations) {
+      scene.traverse(obj => {
+        if (obj.userData.isAnnotation) scene.remove(obj);
+      });
+      Object.entries(annotations).forEach(([id, ann]) => {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+        dot.position.set(ann.x, ann.y, ann.z);
+        dot.userData.isAnnotation = true;
+        scene.add(dot);
 
-    window.removeAnnotation = function(id) {
-      if (confirm('Delete this annotation?')) {
-        mockDB.removeAnnotation(id);
-        updateStatus(`Annotation deleted`);
-      }
-    };
-
-    window.focusAnnotation = function(id) {
-      const annotation = mockDB.annotations[id];
-      if (annotation) {
-        // Smoothly move camera to focus on annotation
-        const targetTheta = Math.atan2(annotation.z, annotation.x);
-        const targetPhi = Math.PI / 3;
-        
-        animateCamera(targetTheta, targetPhi, 5);
-        updateStatus(`Focusing on annotation at (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})`);
-      }
-    };
-
-    window.clearAllAnnotations = function() {
-      if (Object.keys(mockDB.annotations).length === 0) {
-        updateStatus("No annotations to clear");
-        return;
-      }
-      
-      if (confirm('Delete all annotations?')) {
-        mockDB.annotations = {};
-        mockDB.notifyListeners();
-        mockDB.updateAnnotationsList();
-        updateStatus("All annotations cleared");
-      }
-    };
-
-    function showAnnotationDetails(id) {
-      const annotation = mockDB.annotations[id];
-      if (annotation) {
-        const time = new Date(parseInt(id)).toLocaleTimeString();
-        let message = `Annotation Details:\nPosition: (${annotation.x.toFixed(2)}, ${annotation.y.toFixed(2)}, ${annotation.z.toFixed(2)})\nTime: ${time}`;
-        if (annotation.comment) {
-          message += `\nNote: ${annotation.comment}`;
-        }
-        alert(message);
-      }
+        const text = create3DTextLabel(ann.comment, dot.position);
+        text.userData.isAnnotation = true;
+        scene.add(text);
+      });
     }
 
-    function animateCamera(targetTheta, targetPhi, targetRadius) {
-      const startTheta = cameraTheta;
-      const startPhi = cameraPhi;
-      const startRadius = cameraRadius;
-      const duration = 1000; // 1 second
-      const startTime = Date.now();
+    function create3DTextLabel(text, position) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000';
+      ctx.font = '24px Arial';
+      ctx.fillText(text, 10, 40);
 
-      function updateCamera() {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        const easeProgress = 1 - Math.pow(1 - progress, 3); // Ease out cubic
-
-        cameraTheta = startTheta + (targetTheta - startTheta) * easeProgress;
-        cameraPhi = startPhi + (targetPhi - startPhi) * easeProgress;
-        cameraRadius = startRadius + (targetRadius - startRadius) * easeProgress;
-
-        updateCameraPosition();
-
-        if (progress < 1) {
-          requestAnimationFrame(updateCamera);
-        }
-      }
-
-      updateCamera();
+      const texture = new THREE.CanvasTexture(canvas);
+      const material = new THREE.SpriteMaterial({ map: texture });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(1.5, 0.4, 1);
+      sprite.position.set(position.x, position.y + 0.3, position.z);
+      return sprite;
     }
 
     function updateCameraPosition() {
@@ -484,99 +173,11 @@
       camera.lookAt(0, 1, 0);
     }
 
-    function updateAnnotationDisplay(annotations) {
-      // Remove existing annotation dots
-      const dotsToRemove = [];
-      scene.traverse((child) => {
-        if (child.userData.isAnnotation) {
-          dotsToRemove.push(child);
-        }
-      });
-      dotsToRemove.forEach(dot => scene.remove(dot));
-
-      // Add new annotation dots
-      Object.entries(annotations).forEach(([id, annotation]) => {
-        // Main clickable dot
-        const dotGeometry = new THREE.SphereGeometry(0.08, 16, 16);
-        const dotMaterial = new THREE.MeshBasicMaterial({ 
-          color: 0xff3333,
-          transparent: true,
-          opacity: 0.9
-        });
-        const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-        dot.position.set(annotation.x, annotation.y, annotation.z);
-        dot.userData.isAnnotation = true;
-        dot.userData.clickable = true;
-        dot.userData.annotationId = id;
-        scene.add(dot);
-
-        // Outer glow (not clickable)
-        const glowGeometry = new THREE.SphereGeometry(0.12, 16, 16);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-          color: annotation.comment ? 0x44ff44 : 0xff6666, // Green if has comment, red if not
-          transparent: true,
-          opacity: 0.3
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.position.copy(dot.position);
-        glow.userData.isAnnotation = true;
-        glow.userData.clickable = false;
-        scene.add(glow);
-
-        // Add floating number label
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 64;
-        canvas.height = 64;
-        context.fillStyle = 'white';
-        context.fillRect(0, 0, 64, 64);
-        context.fillStyle = 'black';
-        context.font = 'bold 32px Arial';
-        context.textAlign = 'center';
-        context.fillText(Object.keys(annotations).indexOf(id) + 1, 32, 42);
-        
-        const texture = new THREE.CanvasTexture(canvas);
-        const labelMaterial = new THREE.SpriteMaterial({ map: texture });
-        const label = new THREE.Sprite(labelMaterial);
-        label.position.set(annotation.x, annotation.y + 0.3, annotation.z);
-        label.scale.set(0.3, 0.3, 1);
-        label.userData.isAnnotation = true;
-        label.userData.clickable = false;
-        scene.add(label);
-      });
-    }
-
-    function updateStatus(message) {
-      if (statusEl) {
-        statusEl.textContent = message;
-      }
-    }
-
     function animate() {
       requestAnimationFrame(animate);
-
-      // Animate floating spheres
-      const time = Date.now() * 0.001;
-      annotationObjects.forEach((obj, index) => {
-        if (obj.geometry instanceof THREE.SphereGeometry) {
-          obj.position.y = 1 + Math.sin(time + index) * 0.2;
-          obj.rotation.y = time + index;
-        }
-      });
-
-      // Animate annotation dots
-      scene.traverse((child) => {
-        if (child.userData.isAnnotation) {
-          child.rotation.y += 0.02;
-          const scale = 1 + Math.sin(time * 3) * 0.1;
-          child.scale.setScalar(scale);
-        }
-      });
-
       renderer.render(scene, camera);
     }
 
-    // Start the application
     window.addEventListener('load', init);
   </script>
 </body>
