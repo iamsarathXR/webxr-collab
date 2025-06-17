@@ -3,39 +3,25 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>WebXR ES Module Viewer</title>
+  <title>WebXR ImportMap Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #111; overflow: hidden; }
+    body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; }
     canvas { display: block; }
-    #ui, #annotations, #welcome {
-      position: absolute;
-      z-index: 10;
-      background: rgba(255,255,255,0.95);
-      padding: 10px;
-      border-radius: 8px;
-      font-size: 14px;
+    #welcome, #ui, #annotations {
+      position: absolute; z-index: 10; background: rgba(255,255,255,0.95); padding: 10px; border-radius: 8px;
     }
+    #welcome { top: 20%; left: 50%; transform: translateX(-50%); text-align: center; }
     #ui { top: 10px; left: 10px; }
     #annotations { top: 10px; right: 10px; max-height: 300px; overflow-y: auto; max-width: 250px; }
-    #welcome {
-      top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
-      text-align: center;
-      display: none;
-    }
-    #welcome input, #welcome button {
-      margin-top: 10px;
-    }
-    .btn { background: #007bff; color: white; padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; }
+    .btn { margin-top: 10px; background: #007bff; color: white; padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; }
   </style>
 </head>
 <body>
 
 <div id="welcome">
   <h2>WebXR Collaboration Tool</h2>
-  <p>Upload your 3D model (.glb, .gltf, .fbx, .obj) to begin.</p>
+  <p>Upload a .glb, .gltf, .fbx or .obj file</p>
   <input type="file" id="upload" accept=".glb,.gltf,.fbx,.obj" />
   <br/>
   <button id="start" class="btn" disabled>Start</button>
@@ -49,23 +35,33 @@
 </div>
 
 <div id="annotations" style="display:none;">
-  <strong>Annotations:</strong>
-  <div id="list">None yet</div>
+  <strong>Annotations</strong>
+  <div id="list">None</div>
   <button onclick="clearAll()" class="btn">Clear All</button>
 </div>
 
+<!-- Import Map for ES Module Imports -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+    "three/examples/jsm/loaders/FBXLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/FBXLoader.js",
+    "three/examples/jsm/loaders/OBJLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js"
+  }
+}
+</script>
+
 <script type="module">
-  import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-  console.log("Three.js loaded:", THREE.REVISION);
-  import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-  import { FBXLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
-  import { OBJLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+  import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+  import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 
   let scene, camera, renderer, annotationObjects = [], annotations = {}, modelFile;
 
-  const upload = document.getElementById('upload');
-  const startBtn = document.getElementById('start');
-  const list = document.getElementById('list');
+  const $ = id => document.getElementById(id);
+  const upload = $('upload'), startBtn = $('start'), list = $('list');
 
   upload.addEventListener('change', e => {
     modelFile = e.target.files[0];
@@ -73,27 +69,24 @@
   });
 
   startBtn.addEventListener('click', () => {
-    document.getElementById('welcome').style.display = 'none';
-    document.getElementById('ui').style.display = 'block';
-    document.getElementById('annotations').style.display = 'block';
+    $('welcome').style.display = 'none';
+    $('ui').style.display = 'block';
+    $('annotations').style.display = 'block';
     init();
   });
 
   function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x202040);
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(0, 2, 5);
-
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
-
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const light = new THREE.DirectionalLight(0xffffff, 0.8);
     light.position.set(5, 10, 7.5);
     scene.add(light);
-
     loadModel(modelFile);
     setupControls();
     animate();
@@ -178,9 +171,9 @@
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(annotationObjects, true);
-    if (intersects.length > 0) {
-      const point = intersects[0].point;
+    const hits = raycaster.intersectObjects(annotationObjects, true);
+    if (hits.length > 0) {
+      const point = hits[0].point;
       const id = Date.now().toString();
       annotations[id] = { x: point.x, y: point.y, z: point.z };
       updateAnnotations();
@@ -189,8 +182,10 @@
 
   function updateAnnotations() {
     Object.values(annotations).forEach(a => {
-      const geo = new THREE.SphereGeometry(0.06), mat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
-      const dot = new THREE.Mesh(geo, mat);
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06),
+        new THREE.MeshBasicMaterial({ color: 0xff3333 })
+      );
       dot.position.set(a.x, a.y, a.z);
       scene.add(dot);
     });
@@ -199,7 +194,7 @@
 
   window.clearAll = () => {
     annotations = {};
-    list.innerHTML = "None yet";
+    list.innerHTML = "None";
     scene.children = scene.children.filter(c => !c.geometry?.type?.includes('Sphere'));
   }
 
