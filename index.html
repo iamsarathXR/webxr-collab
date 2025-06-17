@@ -74,6 +74,11 @@
     $('annotations').style.display = 'block';
     init();
   });
+  
+  function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
 
   function init() {
     scene = new THREE.Scene();
