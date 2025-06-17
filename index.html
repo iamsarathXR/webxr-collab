@@ -1,26 +1,28 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WebXR ImportMap Viewer</title>
+  <title>WebXR Firebase Collaboration</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; }
     canvas { display: block; }
     #welcome, #ui, #annotations {
-      position: absolute; z-index: 10; background: rgba(255,255,255,0.95); padding: 10px; border-radius: 8px;
+      position: absolute; z-index: 10;
+      background: rgba(255,255,255,0.95); padding: 10px; border-radius: 8px;
     }
     #welcome { top: 20%; left: 50%; transform: translateX(-50%); text-align: center; }
     #ui { top: 10px; left: 10px; }
-    #annotations { top: 10px; right: 10px; max-height: 300px; overflow-y: auto; max-width: 250px; }
-    .btn { margin-top: 10px; background: #007bff; color: white; padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; }
+    #annotations { top: 10px; right: 10px; max-width: 280px; max-height: 300px; overflow-y: auto; }
+    .btn { background: #007bff; color: white; padding: 6px 10px; border: none; border-radius: 5px; cursor: pointer; margin-top: 5px; }
+    .btn-danger { background: #dc3545; }
+    .annotation-item { background: #f4f4f4; padding: 5px; border-radius: 5px; margin-bottom: 6px; }
   </style>
 </head>
 <body>
 
 <div id="welcome">
-  <h2>WebXR Collaboration Tool</h2>
+  <h2>WebXR Collab Tool</h2>
   <p>Upload a .glb, .gltf, .fbx or .obj file</p>
   <input type="file" id="upload" accept=".glb,.gltf,.fbx,.obj" />
   <br/>
@@ -31,16 +33,18 @@
   <strong>Instructions:</strong><br/>
   🖱 Drag = Rotate<br/>
   🔍 Scroll = Zoom<br/>
-  🖱 Right-click = Add annotation
+  🖱 Right-click = Add annotation<br/>
+  <br/>
+  <button id="copyLink" class="btn">Copy Share Link</button>
+  <button id="resetBtn" class="btn btn-danger">Upload New Model</button>
 </div>
 
 <div id="annotations" style="display:none;">
   <strong>Annotations</strong>
-  <div id="list">None</div>
-  <button onclick="clearAll()" class="btn">Clear All</button>
+  <div id="list">None yet</div>
 </div>
 
-<!-- Import Map for ES Module Imports -->
+<!-- Import Maps -->
 <script type="importmap">
 {
   "imports": {
@@ -52,159 +56,236 @@
 }
 </script>
 
+<!-- Firebase SDK -->
 <script type="module">
-  import * as THREE from 'three';
-  import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-  import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-  import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onChildAdded, onChildRemoved, onChildChanged, set, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  let scene, camera, renderer, annotationObjects = [], annotations = {}, modelFile;
+const firebaseConfig = {
+  apiKey: "AIzaSyCZMmwiKQE06CkkMDyW-LJ_7LKWHiTkfT4",
+  authDomain: "remote-webxr.firebaseapp.com",
+  databaseURL: "https://remote-webxr-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "remote-webxr",
+  storageBucket: "remote-webxr.firebasestorage.app",
+  messagingSenderId: "988501576766",
+  appId: "1:988501576766:web:31e174b322a034979c156f",
+  measurementId: "G-ZGGER83W0C"
+};
 
-  const $ = id => document.getElementById(id);
-  const upload = $('upload'), startBtn = $('start'), list = $('list');
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-  upload.addEventListener('change', e => {
-    modelFile = e.target.files[0];
-    startBtn.disabled = !modelFile;
-  });
+const sessionId = new URLSearchParams(location.search).get("session") || ("sess_" + Date.now());
+const dbRef = ref(db, `annotations/${sessionId}`);
+history.replaceState({}, "", `?session=${sessionId}`);
 
-  startBtn.addEventListener('click', () => {
-    $('welcome').style.display = 'none';
-    $('ui').style.display = 'block';
-    $('annotations').style.display = 'block';
-    init();
-  });
-  
-  function animate() {
+let scene, camera, renderer, modelFile;
+let annotationObjects = [], annotations = {}, labelMeshes = {};
+
+const $ = id => document.getElementById(id);
+const upload = $("upload"), startBtn = $("start"), list = $("list");
+
+$("copyLink").onclick = () => {
+  navigator.clipboard.writeText(location.href);
+  alert("Link copied to clipboard");
+};
+
+$("resetBtn").onclick = () => location.reload();
+
+upload.onchange = e => {
+  modelFile = e.target.files[0];
+  startBtn.disabled = !modelFile;
+};
+
+startBtn.onclick = () => {
+  $("welcome").style.display = "none";
+  $("ui").style.display = "block";
+  $("annotations").style.display = "block";
+  init();
+};
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, 2, 5);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+  scene.background = new THREE.Color(0x202040);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const light = new THREE.DirectionalLight(0xffffff, 0.8);
+  light.position.set(5, 10, 7.5);
+  scene.add(light);
+  const grid = new THREE.GridHelper(20, 20);
+  scene.add(grid);
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshLambertMaterial({ color: 0x222233 }));
+  plane.rotation.x = -Math.PI / 2;
+  scene.add(plane);
+  annotationObjects.push(plane);
+  loadModel(modelFile);
+  setupControls();
+  setupRealtimeListeners();
+  animate();
+}
+
+function animate() {
   requestAnimationFrame(animate);
   renderer.render(scene, camera);
 }
 
-  function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x202040);
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 2, 5);
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const light = new THREE.DirectionalLight(0xffffff, 0.8);
-    light.position.set(5, 10, 7.5);
-    scene.add(light);
-    loadModel(modelFile);
-    setupControls();
-    animate();
-  }
-
-  function loadModel(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const reader = new FileReader();
-    reader.onload = e => {
-      const buffer = e.target.result;
-      if (ext === 'glb' || ext === 'gltf') {
-        const loader = new GLTFLoader();
-        loader.parse(buffer, '', gltf => addToScene(gltf.scene));
-      } else if (ext === 'fbx') {
-        const loader = new FBXLoader();
-        addToScene(loader.parse(buffer));
-      } else if (ext === 'obj') {
-        const loader = new OBJLoader();
-        const text = new TextDecoder().decode(buffer);
-        addToScene(loader.parse(text));
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  }
-
-  function addToScene(model) {
-    model.traverse(c => {
-      if (c.isMesh) {
-        c.userData.annotatable = true;
-        annotationObjects.push(c);
-      }
-    });
-    scene.add(model);
-  }
-
-  function setupControls() {
-    let isDragging = false, mouse = {x: 0, y: 0}, theta = 0, phi = Math.PI/4, radius = 5;
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('mousedown', e => {
-      if (e.button === 0) isDragging = true;
-      mouse = {x: e.clientX, y: e.clientY};
-    });
-    document.addEventListener('mouseup', e => {
-      if (e.button === 2) handleAnnotation(e);
-      isDragging = false;
-    });
-    document.addEventListener('mousemove', e => {
-      if (!isDragging) return;
-      const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
-      theta -= dx * 0.01;
-      phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + dy * 0.01));
-      updateCamera();
-      mouse = {x: e.clientX, y: e.clientY};
-    });
-    document.addEventListener('wheel', e => {
-      radius = Math.max(2, Math.min(15, radius + e.deltaY * 0.01));
-      updateCamera();
-    });
-
-    function updateCamera() {
-      camera.position.x = radius * Math.sin(phi) * Math.cos(theta);
-      camera.position.y = radius * Math.cos(phi);
-      camera.position.z = radius * Math.sin(phi) * Math.sin(theta);
-      camera.lookAt(0, 1, 0);
+function loadModel(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const reader = new FileReader();
+  reader.onload = e => {
+    const buffer = e.target.result;
+    let obj;
+    if (ext === "glb" || ext === "gltf") {
+      new GLTFLoader().parse(buffer, "", gltf => addToScene(gltf.scene));
+    } else if (ext === "fbx") {
+      obj = new FBXLoader().parse(buffer);
+      addToScene(obj);
+    } else if (ext === "obj") {
+      obj = new OBJLoader().parse(new TextDecoder().decode(buffer));
+      addToScene(obj);
     }
+  };
+  reader.readAsArrayBuffer(file);
+}
 
+function addToScene(obj) {
+  obj.traverse(c => {
+    if (c.isMesh) annotationObjects.push(c);
+  });
+  scene.add(obj);
+}
+
+let theta = 0, phi = Math.PI / 4, radius = 5;
+
+function setupControls() {
+  let dragging = false, mouse = { x: 0, y: 0 };
+  window.onresize = () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  };
+  document.oncontextmenu = e => e.preventDefault();
+  document.onmousedown = e => {
+    if (e.button === 0) dragging = true;
+    mouse = { x: e.clientX, y: e.clientY };
+  };
+  document.onmouseup = e => {
+    if (e.button === 2) handleAnnotation(e);
+    dragging = false;
+  };
+  document.onmousemove = e => {
+    if (!dragging) return;
+    const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
+    theta -= dx * 0.01;
+    phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + dy * 0.01));
     updateCamera();
-  }
+    mouse = { x: e.clientX, y: e.clientY };
+  };
+  document.onwheel = e => {
+    radius = Math.max(2, Math.min(15, radius + e.deltaY * 0.01));
+    updateCamera();
+  };
+  updateCamera();
+}
 
-  function handleAnnotation(e) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObjects(annotationObjects, true);
-    if (hits.length > 0) {
-      const point = hits[0].point;
-      const id = Date.now().toString();
-      annotations[id] = { x: point.x, y: point.y, z: point.z };
-      updateAnnotations();
-    }
-  }
+function updateCamera() {
+  camera.position.x = radius * Math.sin(phi) * Math.cos(theta);
+  camera.position.y = radius * Math.cos(phi);
+  camera.position.z = radius * Math.sin(phi) * Math.sin(theta);
+  camera.lookAt(0, 1, 0);
+}
 
-  function updateAnnotations() {
-    Object.values(annotations).forEach(a => {
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06),
-        new THREE.MeshBasicMaterial({ color: 0xff3333 })
-      );
-      dot.position.set(a.x, a.y, a.z);
-      scene.add(dot);
-    });
-    list.innerHTML = Object.keys(annotations).map((k, i) => `<div>#${i + 1} @ ${k}</div>`).join('');
+function handleAnnotation(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(annotationObjects, true);
+  if (hits.length > 0) {
+    const p = hits[0].point;
+    const id = Date.now().toString();
+    const a = { x: p.x, y: p.y, z: p.z, comment: "" };
+    set(ref(db, `annotations/${sessionId}/${id}`), a);
   }
+}
 
-  window.clearAll = () => {
-    annotations = {};
-    list.innerHTML = "None";
-    scene.children = scene.children.filter(c => !c.geometry?.type?.includes('Sphere'));
+function setupRealtimeListeners() {
+  onChildAdded(dbRef, snap => {
+    annotations[snap.key] = snap.val();
+    updateAnnotations();
+  });
+  onChildChanged(dbRef, snap => {
+    annotations[snap.key] = snap.val();
+    updateAnnotations();
+  });
+  onChildRemoved(dbRef, snap => {
+    delete annotations[snap.key];
+    updateAnnotations();
+  });
+}
+
+function updateAnnotations() {
+  Object.values(labelMeshes).forEach(m => scene.remove(m));
+  labelMeshes = {};
+  list.innerHTML = "";
+  let i = 1;
+  for (const [id, a] of Object.entries(annotations)) {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+    dot.position.set(a.x, a.y, a.z);
+    scene.add(dot);
+    const label = makeLabel("Note " + i);
+    label.position.set(a.x, a.y + 0.1, a.z);
+    scene.add(label);
+    labelMeshes[id] = label;
+    list.innerHTML += `
+      <div class="annotation-item">
+        <strong>Note ${i}</strong><br/>
+        Pos: (${a.x.toFixed(1)}, ${a.y.toFixed(1)}, ${a.z.toFixed(1)})<br/>
+        ${a.comment ? `Note: ${a.comment}<br/>` : ""}
+        <button class="btn" onclick="addComment('${id}')">Comment</button>
+        <button class="btn" onclick="focusAnnotation('${id}')">Focus</button>
+        <button class="btn btn-danger" onclick="removeAnnotation('${id}')">Delete</button>
+      </div>`;
+    i++;
   }
+}
 
-  document.getElementById('welcome').style.display = 'block';
+function makeLabel(text) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = "16px sans-serif";
+  ctx.fillStyle = "white";
+  ctx.fillText(text, 0, 16);
+  const tex = new THREE.CanvasTexture(canvas);
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+}
+
+window.addComment = id => {
+  const c = prompt("Add comment:", annotations[id].comment || "");
+  if (c != null) {
+    annotations[id].comment = c;
+    set(ref(db, `annotations/${sessionId}/${id}`), annotations[id]);
+  }
+};
+
+window.removeAnnotation = id => remove(ref(db, `annotations/${sessionId}/${id}`));
+
+window.focusAnnotation = id => {
+  const a = annotations[id];
+  camera.position.set(a.x, a.y + 1, a.z + 2);
+  camera.lookAt(a.x, a.y, a.z);
+};
 </script>
-
 </body>
 </html>
