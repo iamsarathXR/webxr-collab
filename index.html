@@ -122,9 +122,9 @@ function init() {
   const light = new THREE.DirectionalLight(0xffffff, 0.8);
   light.position.set(5, 10, 7.5);
   scene.add(light);
-  const grid = new THREE.GridHelper(20, 20);
+  const grid = new THREE.GridHelper(50, 50);
   scene.add(grid);
-  const plane = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshLambertMaterial({ color: 0x222233 }));
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshLambertMaterial({ color: 0x222233 }));
   plane.rotation.x = -Math.PI / 2;
   scene.add(plane);
   annotationObjects.push(plane);
@@ -199,7 +199,9 @@ function setupControls() {
     mouse = { x: e.clientX, y: e.clientY };
   };
   document.onwheel = e => {
-    radius = Math.max(minRadius, Math.min(maxRadius, radius + e.deltaY * 0.01));
+    const zoomStep = radius * 0.05;  // 5% of current radius
+    radius += e.deltaY > 0 ? zoomStep : -zoomStep;
+    radius = Math.max(minRadius, Math.min(maxRadius, radius));
     updateCamera();
   };
   updateCamera();
