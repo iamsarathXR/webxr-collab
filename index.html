@@ -119,6 +119,14 @@ startBtn.onclick = () => {
   init();
 };
 
+$("xrBtn").onclick = () => {
+  // trigger enter XR manually
+  const sessionInit = { optionalFeatures: ['local-floor', 'bounded-floor'] };
+  navigator.xr.requestSession('immersive-vr', sessionInit).then(session => {
+    renderer.xr.setSession(session);
+  });
+};
+
 function init() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 1000);
@@ -135,6 +143,8 @@ function init() {
   scene.add(grid);
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshLambertMaterial({ color: 0x222233 }));
   plane.rotation.x = -Math.PI / 2;
+  renderer.xr.enabled = true;
+  document.body.appendChild(VRButton.createButton(renderer));
   scene.add(plane);
   annotationObjects.push(plane);
   loadModel(modelFile);
