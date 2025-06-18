@@ -37,6 +37,7 @@
   <br/>
   <button id="copyLink" class="btn">Copy Share Link</button>
   <button id="resetBtn" class="btn btn-danger">Upload New Model</button>
+  <button id="xrBtn" class="btn">Enter XR</button>
 </div>
 
 <div id="annotations" style="display:none;">
@@ -52,6 +53,7 @@
     "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
     "three/examples/jsm/loaders/FBXLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/FBXLoader.js",
     "three/examples/jsm/loaders/OBJLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/OBJLoader.js"
+    "three/examples/jsm/webxr/VRButton.js": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js"
   }
 }
 </script>
@@ -62,6 +64,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onChildAdded, onChildRemoved, onChildChanged, set, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
@@ -96,7 +99,13 @@ $("copyLink").onclick = () => {
   alert("Link copied to clipboard");
 };
 
-$("resetBtn").onclick = () => location.reload();
+$("resetBtn").onclick = () => {
+  // 🔁 Delete all annotations from Firebase
+  remove(ref(db, `annotations/${sessionId}`)).then(() => {
+    // 🔄 Refresh page cleanly
+    location.reload();
+  });
+};
 
 upload.onchange = e => {
   modelFile = e.target.files[0];
