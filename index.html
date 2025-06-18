@@ -85,6 +85,8 @@ history.replaceState({}, "", `?session=${sessionId}`);
 
 let scene, camera, renderer, modelFile;
 let annotationObjects = [], annotations = {}, labelMeshes = {};
+let radius = 5, minRadius = 1, maxRadius = 50;
+let theta = 0, phi = Math.PI / 4;
 
 const $ = id => document.getElementById(id);
 const upload = $("upload"), startBtn = $("start"), list = $("list");
@@ -157,13 +159,18 @@ function loadModel(file) {
 }
 
 function addToScene(obj) {
-  obj.traverse(c => {
-    if (c.isMesh) annotationObjects.push(c);
-  });
+  obj.traverse(c => { if (c.isMesh) annotationObjects.push(c); });
   scene.add(obj);
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  obj.position.sub(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  radius = maxDim * 1.5;
+  minRadius = maxDim * 0.2;
+  maxRadius = maxDim * 5;
+  updateCamera();
 }
-
-let theta = 0, phi = Math.PI / 4, radius = 5;
 
 function setupControls() {
   let dragging = false, mouse = { x: 0, y: 0 };
@@ -190,7 +197,7 @@ function setupControls() {
     mouse = { x: e.clientX, y: e.clientY };
   };
   document.onwheel = e => {
-    radius = Math.max(2, Math.min(15, radius + e.deltaY * 0.01));
+    radius = Math.max(minRadius, Math.min(maxRadius, radius + e.deltaY * 0.01));
     updateCamera();
   };
   updateCamera();
