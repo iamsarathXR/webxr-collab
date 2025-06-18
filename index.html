@@ -143,6 +143,8 @@ const grid = new THREE.GridHelper(1000, 500, 0x444444, 0x222222);
 grid.material.opacity = 0.25;
 grid.material.transparent = true;
 scene.add(grid);
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshLambertMaterial({ color: 0x222233 }));
+  plane.rotation.x = -Math.PI / 2;
   renderer.xr.enabled = true;
   document.body.appendChild(VRButton.createButton(renderer));
   scene.add(plane);
