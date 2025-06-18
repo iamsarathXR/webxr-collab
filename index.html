@@ -31,9 +31,9 @@
 
 <div id="ui" style="display:none;">
   <strong>Instructions:</strong><br/>
-  🖱 Drag = Rotate<br/>
-  🔍 Scroll = Zoom<br/>
-  🖱 Right-click = Add annotation<br/>
+    <div>• Hold and drag: Rotate camera</div>
+    <div>• Alt and drag: Pan camera</div>
+    <div>• Right-click annotations: Add comments</div>
   <br/>
   <button id="copyLink" class="btn">Copy Share Link</button>
   <button id="resetBtn" class="btn btn-danger">Upload New Model</button>
@@ -139,10 +139,10 @@ function init() {
   const light = new THREE.DirectionalLight(0xffffff, 0.8);
   light.position.set(5, 10, 7.5);
   scene.add(light);
-const grid = new THREE.GridHelper(1000, 500, 0x444444, 0x222222);
-grid.material.opacity = 0.25;
-grid.material.transparent = true;
-scene.add(grid);
+  const grid = new THREE.GridHelper(1000, 500, 0x444444, 0x222222);
+  grid.material.opacity = 0.50;
+  grid.material.transparent = true;
+  scene.add(grid);
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshLambertMaterial({ color: 0x222233 }));
   plane.rotation.x = -Math.PI / 2;
   renderer.xr.enabled = true;
@@ -157,6 +157,15 @@ scene.add(grid);
 
 function animate() {
   requestAnimationFrame(animate);
+  
+
+  Object.values(labelMeshes).forEach(({ label }) => {
+    const distance = camera.position.distanceTo(label.position);
+    const baseSize = 0.1;
+    const scale = baseSize * distance;
+    label.scale.set(scale, scale * 0.5, 1);
+  });
+
   renderer.render(scene, camera);
 }
 
@@ -287,19 +296,30 @@ function setupRealtimeListeners() {
 }
 
 function updateAnnotations() {
-  Object.values(labelMeshes).forEach(m => scene.remove(m));
+  // Remove old markers
+  Object.values(labelMeshes).forEach(({ dot, label }) => {
+    scene.remove(dot);
+    scene.remove(label);
+  });
   labelMeshes = {};
   list.innerHTML = "";
+
   let i = 1;
   for (const [id, a] of Object.entries(annotations)) {
     const dotSize = radius * 0.015;
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(dotSize), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(dotSize),
+      new THREE.MeshBasicMaterial({ color: 0xff3333 })
+    );
     dot.position.set(a.x, a.y, a.z);
     scene.add(dot);
+
     const label = makeLabel("Note " + i);
-    label.position.set(a.x, a.y + dotSize * 2, a.z);
+    label.position.set(a.x, a.y + radius * 0.05, a.z);
     scene.add(label);
-    labelMeshes[id] = label;
+
+    labelMeshes[id] = { label, dot };
+
     list.innerHTML += `
       <div class="annotation-item">
         <strong>Note ${i}</strong><br/>
@@ -313,15 +333,39 @@ function updateAnnotations() {
   }
 }
 
+
 function makeLabel(text) {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
-  ctx.font = "24px sans-serif"; // make canvas text higher resolution
+
+  const fontSize = 64;
+  ctx.font = `${fontSize}px sans-serif`;
+  const textWidth = ctx.measureText(text).width;
+
+  canvas.width = textWidth;
+  canvas.height = fontSize * 1.5;
+  ctx.font = `${fontSize}px sans-serif`;
   ctx.fillStyle = "white";
-  ctx.fillText(text, 0, 24);
-  const tex = new THREE.CanvasTexture(canvas);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
-  sprite.scale.set(radius * 0.25, radius * 0.1, 1);  // dynamic scaling
+  ctx.textBaseline = "top";
+  ctx.fillText(text, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.encoding = THREE.sRGBEncoding;
+  texture.needsUpdate = true;
+
+  const spriteMaterial = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+  });
+
+  const sprite = new THREE.Sprite(spriteMaterial);
+
+  // 🧠 Adjust size here only — 0.4 is a good balance
+  const height = 1;
+  const aspect = canvas.width / canvas.height;
+  sprite.scale.set(height * aspect, height, 1);
+
   return sprite;
 }
 
@@ -337,7 +381,19 @@ window.removeAnnotation = id => remove(ref(db, `annotations/${sessionId}/${id}`)
 
 window.focusAnnotation = id => {
   const a = annotations[id];
-  camera.position.set(a.x, a.y + 1, a.z + 2);
+
+  // Direction camera is currently looking from orbit
+  const camDir = new THREE.Vector3(
+    Math.sin(phi) * Math.cos(theta),
+    Math.cos(phi),
+    Math.sin(phi) * Math.sin(theta)
+  );
+
+  // New camera position offset back from the annotation
+  const focusDistance = radius * 0.6; // 60% of current zoom
+  const newPos = new THREE.Vector3(a.x, a.y, a.z).add(camDir.multiplyScalar(focusDistance));
+
+  camera.position.copy(newPos);
   camera.lookAt(a.x, a.y, a.z);
 };
 </script>
