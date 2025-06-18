@@ -87,7 +87,7 @@ let scene, camera, renderer, modelFile;
 let annotationObjects = [], annotations = {}, labelMeshes = {};
 let radius = 5, minRadius = 1, maxRadius = 50;
 let theta = 0, phi = Math.PI / 4;
-
+let panOffset = new THREE.Vector3();
 const $ = id => document.getElementById(id);
 const upload = $("upload"), startBtn = $("start"), list = $("list");
 
@@ -112,7 +112,7 @@ startBtn.onclick = () => {
 
 function init() {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 1000);
+  camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 1000);
   camera.position.set(0, 2, 5);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
@@ -190,14 +190,32 @@ function setupControls() {
     if (e.button === 2) handleAnnotation(e);
     dragging = false;
   };
-  document.onmousemove = e => {
-    if (!dragging) return;
+document.onmousemove = e => {
+  if (e.buttons === 1 && e.altKey) {
+    // Alt + LMB for pan
+    const panSpeed = 0.002;
+    const dx = e.movementX;
+    const dy = e.movementY;
+
+    const pan = new THREE.Vector3();
+    camera.getWorldDirection(pan);
+    const right = new THREE.Vector3().crossVectors(pan, camera.up).normalize();
+    const up = new THREE.Vector3().copy(camera.up).normalize();
+
+    panOffset.add(right.multiplyScalar(-dx * panSpeed * radius));
+    panOffset.add(up.multiplyScalar(dy * panSpeed * radius));
+
+    updateCamera();
+  } else if (dragging) {
+    // Normal LMB drag to orbit
     const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
     theta -= dx * 0.01;
     phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + dy * 0.01));
     updateCamera();
     mouse = { x: e.clientX, y: e.clientY };
-  };
+  }
+};
+
   document.onwheel = e => {
     const zoomStep = radius * 0.05;  // 5% of current radius
     radius += e.deltaY > 0 ? zoomStep : -zoomStep;
@@ -208,10 +226,11 @@ function setupControls() {
 }
 
 function updateCamera() {
-  camera.position.x = radius * Math.sin(phi) * Math.cos(theta);
-  camera.position.y = radius * Math.cos(phi);
-  camera.position.z = radius * Math.sin(phi) * Math.sin(theta);
-  camera.lookAt(0, 1, 0);
+  const x = radius * Math.sin(phi) * Math.cos(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+  camera.position.set(x, y, z).add(panOffset);
+  camera.lookAt(panOffset);
 }
 
 function handleAnnotation(e) {
@@ -252,11 +271,12 @@ function updateAnnotations() {
   list.innerHTML = "";
   let i = 1;
   for (const [id, a] of Object.entries(annotations)) {
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+    const dotSize = radius * 0.015;
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(dotSize), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
     dot.position.set(a.x, a.y, a.z);
     scene.add(dot);
     const label = makeLabel("Note " + i);
-    label.position.set(a.x, a.y + 0.1, a.z);
+    label.position.set(a.x, a.y + dotSize * 2, a.z);
     scene.add(label);
     labelMeshes[id] = label;
     list.innerHTML += `
@@ -275,11 +295,13 @@ function updateAnnotations() {
 function makeLabel(text) {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
-  ctx.font = "16px sans-serif";
+  ctx.font = "24px sans-serif"; // make canvas text higher resolution
   ctx.fillStyle = "white";
-  ctx.fillText(text, 0, 16);
+  ctx.fillText(text, 0, 24);
   const tex = new THREE.CanvasTexture(canvas);
-  return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+  sprite.scale.set(radius * 0.25, radius * 0.1, 1);  // dynamic scaling
+  return sprite;
 }
 
 window.addComment = id => {
